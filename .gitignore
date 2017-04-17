@@ -1,0 +1,6 @@
+*.pyc
+*.xlsx
+*.docx
+*.png
+*.jpg
+.ipynb_checkpoints/
