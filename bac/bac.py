@@ -89,3 +89,6 @@ class Drink():
     sd = 0.6
     alcohol_content = self.get_alcohol_content()
     return alcohol_content / sd
+
+  def __add__(self):
+      """Add two drinks together."""

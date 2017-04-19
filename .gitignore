@@ -4,3 +4,5 @@
 *.png
 *.jpg
 .ipynb_checkpoints/
+*/.ipynb_checkpoints/
+doc/misc/
