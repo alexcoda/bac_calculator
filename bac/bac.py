@@ -1,66 +1,86 @@
 """Classes for BAC calculation."""
 from datetime import datetime
 import pandas as pd
+import numpy as np
 
-import utils
+# Local imports
+from utils import round_to_nearest_ten
 
 bac_table = pd.read_csv("BAC_by_drink.csv", index_col="Body Weight")
 
 class Person():
   """A person has dimensions and a BAC."""
-  
+  decrease_per_hour = 0.015
+
   def __init__(self, name, age, weight, bmi=None):
     """Initialize a non-drunk user."""
     self.name = name
     self.weight = weight
     self.age = age
     self.bmi = bmi
-    self.bac = 0.0
-    self.current_time = datetime.now()     
-  
+    self._init_drink_log()
+
+  def _init_drink_log(self):
+    """Initialize an empty drinking log."""
+    index = pd.Index([], name='Time')
+    columns = ['Drink', 'BAC']
+    self.drink_log = pd.DataFrame([], index, columns)
+
+    init_time = datetime.now()
+    init_bac = 0.0
+    self._update_drink_log(init_time, init_bac)
+
+  def _update_drink_log(self, time, bac, drink_name=None):
+    """Add a drink or timestep to the drinking log."""
+    new_entry = np.array([drink_name, bac]).T
+    self.drink_log.loc[time] = new_entry
+
+  def _get_last_drink_log_entry(self):
+    """Access the most recent entry in the drink log."""
+    num_log_entries = len(self.drink_log)
+    return self.drink_log.iloc[num_log_entries - 1]
+
   def drink(self, drink, time=None):
     """Consume a drink and update BAC."""
-    if not time:
-      time = datetime.now()
-    sd = drink.get_standard_drinks()
-    self._update_bac(sd, time)
-      
-  def _update_bac(self, standard_drinks=0, time=None):
+    time = datetime.now() if not time else time
+    new_bac = self._determine_new_bac(drink, time)
+
+    self._update_drink_log(time, new_bac, drink.name)
+
+  def _determine_new_bac(self, drink, time):
     """Update BAC."""
-    self._decrement_bac(time)
-    if standard_drinks:
-      self._increment_bac(standard_drinks)
+    last_drink_entry = self._get_last_drink_log_entry()
+    last_drink_time = last_drink_entry.name.to_pydatetime()
+    last_bac = float(last_drink_entry['BAC'])
 
-  def _decrement_bac(self, time=None):
-    """Decrease the BAC since last measure."""
-    decrease_per_hour = 0.015
-    
-    last_time = self.current_time
-    if not time:
-      self.current_time = datetime.now()
-    else:
-      self.current_time = time
+    bac_decrease = self._determine_bac_decrease(last_drink_time, time)
+    bac_increase = self._determine_bac_increase(drink)
 
-    time_dif = self.current_time - last_time
+    new_bac = last_bac - bac_decrease + bac_increase
+    new_bac = max(new_bac, 0.0)
+    return new_bac
+
+  def _determine_bac_decrease(self, start_time, end_time):
+    """Determine the BAC decrease since the last time."""
+    time_dif = end_time - start_time
     hour_dif = time_dif.seconds / 60. / 60.
 
-    bac_dif = self.bac - hour_dif * decrease_per_hour
-    self.bac = max(0.0, bac_dif)
-  
-  def _increment_bac(self, standard_drinks):
-    """Increase bac based off of alcohol consumed."""
-    rounded_weight = utils.round_to_nearest_ten(self.weight)
-    rounded_drinks = int(round(standard_drinks))
-    bac_increase = bac_table[str(rounded_drinks)][rounded_weight]
-    self.bac += bac_increase
+    bac_decrease = hour_dif * self.decrease_per_hour
+    return bac_decrease
 
-  def get_bac(self):
-    return self.bac
+  def _determine_bac_increase(self, drink):
+    """Determine the BAC increase based off of a given drink."""
+    standard_drinks = drink.get_standard_drinks()
+    rounded_weight = round_to_nearest_ten(self.weight)
+    rounded_drinks = int(round(standard_drinks))
+
+    bac_increase = bac_table[str(rounded_drinks)][rounded_weight]
+    return bac_increase
 
 
 class Drink():
   """A drink has a volume and an alcohol content"""
-  
+
   def __init__(self, name, volume, abv):
     """Make a drink."""
     self.name = name
@@ -75,7 +95,7 @@ class Drink():
     if self.abv > 1:
       self.abv /= 100.
       # print "ABV = {}".format(self.abv)
-  
+
   def get_alcohol_content(self):
     """Get the alcohol content of this drink in the given units."""
     return self.volume * self.abv
