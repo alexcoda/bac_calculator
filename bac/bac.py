@@ -1,12 +1,25 @@
 """Classes for BAC calculation."""
+from collections import namedtuple
 from datetime import datetime
 import pandas as pd
 import numpy as np
+import pickle
 
 # Local imports
-from utils import round_to_nearest_ten
+from polyfit import polyval2d
 
-bac_table = pd.read_csv("BAC_by_drink.csv", index_col="Body Weight")
+log_entry = namedtuple('log_entry', ['time', 'drink', 'bac'])
+try:
+    with open('bac_polyfit.pkl', 'r') as f:
+        poly_coeff = pickle.load(f)
+except IOError:
+    poly_coeff = \
+        np.array([4.44974702e-03, -1.17137983e-04,  9.12197099e-07,
+                  -2.12299842e-09,  9.56141142e-02, -8.64115228e-04,
+                  3.26934846e-06, -4.39083421e-09,  2.67995601e-04,
+                  -7.61634984e-06,  6.75404403e-08, -1.73084231e-10,
+                  -1.11933009e-05,  3.28956868e-07, -3.07216348e-09,
+                  8.16564848e-12])
 
 
 class Person():
@@ -26,12 +39,13 @@ class Person():
         index = pd.Index([], name='Time')
         columns = ['Drink', 'BAC']
         self.drink_log = pd.DataFrame([], index, columns)
+        self.add_empty_log_entry()
 
-        init_time = datetime.now()
-        init_bac = 0.0
-        self._update_drink_log(init_time, init_bac)
+    def add_empty_log_entry(self):
+        """Add an empty log entry. Done to keep track of bac decay."""
+        self._update_drink_log(time=datetime.now(), bac=0.0, drink_name=None)
 
-    def _update_drink_log(self, time, bac, drink_name=None):
+    def _update_drink_log(self, time, bac, drink_name):
         """Add a drink or timestep to the drinking log."""
         new_entry = np.array([drink_name, bac]).T
         self.drink_log.loc[time] = new_entry
@@ -39,7 +53,13 @@ class Person():
     def _get_last_drink_log_entry(self):
         """Access the most recent entry in the drink log."""
         num_log_entries = len(self.drink_log)
-        return self.drink_log.iloc[num_log_entries - 1]
+        last_entry = self.drink_log.iloc[num_log_entries - 1]
+
+        time = last_entry.name.to_pydatetime()
+        drink = last_entry['Drink']
+        bac = float(last_entry['BAC'])
+
+        return log_entry(time, drink, bac)
 
     def drink(self, drink, time=None):
         """Consume a drink and update BAC."""
@@ -50,10 +70,7 @@ class Person():
 
     def _determine_new_bac(self, drink, time):
         """Update BAC."""
-        last_drink_entry = self._get_last_drink_log_entry()
-        last_drink_time = last_drink_entry.name.to_pydatetime()
-        last_bac = float(last_drink_entry['BAC'])
-
+        last_drink_time, __, last_bac = self._get_last_drink_log_entry()
         bac_decrease = self._determine_bac_decrease(last_drink_time, time)
         bac_increase = self._determine_bac_increase(drink)
 
@@ -72,10 +89,10 @@ class Person():
     def _determine_bac_increase(self, drink):
         """Determine the BAC increase based off of a given drink."""
         standard_drinks = drink.get_standard_drinks()
-        rounded_weight = round_to_nearest_ten(self.weight)
-        rounded_drinks = int(round(standard_drinks))
+        x = np.array([standard_drinks], dtype='float64')
+        y = np.array([self.weight], dtype='float64')
 
-        bac_increase = bac_table[str(rounded_drinks)][rounded_weight]
+        bac_increase = polyval2d(x, y, poly_coeff)[0]
         return bac_increase
 
 
